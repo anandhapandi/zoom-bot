@@ -1,69 +1,50 @@
+# Use Ubuntu as the base image
 FROM ubuntu:22.04 AS base
 
-SHELL ["/bin/bash", "-c"]
-
+# Set environment variables for the project
 ENV project=meeting-sdk-linux-sample
 ENV cwd=/tmp/$project
 
+# Set working directory
 WORKDIR $cwd
 
-ARG DEBIAN_FRONTEND=noninteractive
-
-#  Install Dependencies
-RUN apt-get update  \
+# Install build dependencies (CMake, OpenCV, and other libs)
+RUN apt-get update \
     && apt-get install -y \
     build-essential \
-    ca-certificates \
     cmake \
     curl \
     gdb \
     git \
-    gfortran \
     libopencv-dev \
     libdbus-1-3 \
-    libgbm1 \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libglib2.0-dev \
     libssl-dev \
-    libx11-dev \
-    libx11-xcb1 \
-    libxcb-image0 \
-    libxcb-keysyms1 \
-    libxcb-randr0 \
-    libxcb-shape0 \
-    libxcb-shm0 \
-    libxcb-xfixes0 \
-    libxcb-xtest0 \
-    libgl1-mesa-dri \
-    libxfixes3 \
-    linux-libc-dev \
-    pkgconf \
-    tar \
-    unzip \
-    zip
+    libglib2.0-0 \
+    pulseaudio pulseaudio-utils \
+    && cmake --version  # Verifying cmake installation
 
-# Install ALSA
-RUN apt-get install -y libasound2 libasound2-plugins alsa alsa-utils alsa-oss
-
-# Install Pulseaudio
-RUN apt-get install -y  pulseaudio pulseaudio-utils
-
-FROM base AS deps
-
+# Install Tini for better process management (keep containers running in the background)
 ENV TINI_VERSION v0.19.0
 ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
 RUN chmod +x /tini
 
-WORKDIR /opt
-RUN git clone --depth 1 https://github.com/Microsoft/vcpkg.git \
-    && ./vcpkg/bootstrap-vcpkg.sh -disableMetrics \
-    && ln -s /opt/vcpkg/vcpkg /usr/local/bin/vcpkg \
-    && vcpkg install vcpkg-cmake
+# Copy the essential project files into the container
+COPY ./CMakeLists.txt /tmp/meeting-sdk-linux-sample/CMakeLists.txt
+COPY ./CMakePresets.json /tmp/meeting-sdk-linux-sample/CMakePresets.json
+COPY ./compose.yaml /tmp/meeting-sdk-linux-sample/compose.yaml
+COPY ./vcpkg.json /tmp/meeting-sdk-linux-sample/vcpkg.json
 
-FROM deps AS build
+# Copy the source code and SDK (lib and src)
+COPY ./lib/zoomsdk /tmp/meeting-sdk-linux-sample/lib/zoomsdk
+COPY ./src /tmp/meeting-sdk-linux-sample/src
 
+# Copy the entry script
+COPY ./bin/entry.sh /tmp/meeting-sdk-linux-sample/bin/entry.sh
+RUN chmod +x /tmp/meeting-sdk-linux-sample/bin/entry.sh
+
+# Configure and build the application using CMake
 WORKDIR $cwd
+RUN cmake -S . -B build && cmake --build build
+
+# Define entry point to handle application startup
 ENTRYPOINT ["/tini", "--", "./bin/entry.sh"]
-
-
